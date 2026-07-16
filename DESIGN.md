@@ -123,3 +123,16 @@ Every torrent downloads into its own subfolder named after the torrent
 overriding `output_folder` (which bypassed librqbit's subfolder logic and
 dumped multi-file torrents loose). Remote `.torrent` URLs, whose name isn't
 known until fetched, fall back to librqbit's default (still wraps multi-file).
+
+## Proxy mode keeps everything behind the proxy (v0.2.1, 2026-07-16)
+
+librqbit announces to a torrent's udp:// trackers over the raw connection even
+when a SOCKS5 proxy is set (it has no proxy-aware UDP path and `disable_trackers`
+is a no-op in 8.1.1), which leaks the real IP. So in proxy mode `add_source`
+strips udp:// trackers before librqbit sees them — from magnets (rebuild the
+`tr` params) and from .torrent files (re-encode keeping only http(s) trackers,
+splicing the original `info` dict bytes verbatim so the info-hash is unchanged;
+see `torrent_http_only_bytes`). Peer discovery through the proxy then relies on
+a broad injected HTTP/HTTPS tracker list (`PROXY_MODE_HTTP_TRACKERS`) plus PEX,
+which rides the already-proxied peer connections. DHT stays disabled (UDP).
+Unit tests in engine.rs cover the infohash-preserving re-encode and magnet strip.
