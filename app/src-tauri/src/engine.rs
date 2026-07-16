@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use librqbit::{
-    api::TorrentIdOrHash, limits::LimitsConfig, AddTorrent, AddTorrentOptions, ManagedTorrent,
-    Session, SessionOptions, SessionPersistenceConfig,
+    api::TorrentIdOrHash, limits::LimitsConfig, torrent_from_bytes, AddTorrent, AddTorrentOptions,
+    ByteBufOwned, Magnet, ManagedTorrent, Session, SessionOptions, SessionPersistenceConfig,
 };
 use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
@@ -176,6 +176,45 @@ fn ensure_vpn_allows_transfers(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
+/// Turn an arbitrary torrent name into a safe single-component folder name,
+/// or None if nothing usable remains.
+fn sanitize_folder_name(name: &str) -> Option<String> {
+    let cleaned: String = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if (c as u32) < 0x20 => '_',
+            c => c,
+        })
+        .collect();
+    // Windows dislikes trailing dots/spaces on folder names.
+    let trimmed = cleaned.trim().trim_end_matches(['.', ' ']).trim();
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Best-effort torrent name, known at add-time, used to give each download its
+/// own subfolder. Magnets use the `dn` display name; local .torrent files use
+/// the metadata `name`. Remote .torrent URLs resolve too late, so they fall
+/// back to librqbit's default (which still wraps multi-file torrents).
+fn torrent_subfolder(source: &str) -> Option<String> {
+    let raw = if source.starts_with("magnet:") {
+        Magnet::parse(source).ok().and_then(|m| m.name)
+    } else if source.starts_with("http") {
+        None
+    } else {
+        std::fs::read(source).ok().and_then(|bytes| {
+            torrent_from_bytes::<ByteBufOwned>(&bytes)
+                .ok()
+                .and_then(|t| t.info.name.map(|n| String::from_utf8_lossy(n.0.as_ref()).into_owned()))
+        })
+    };
+    raw.and_then(|n| sanitize_folder_name(&n))
+}
+
 pub async fn add_source(app: &AppHandle, source: String) -> Result<usize, String> {
     let state = app.state::<Arc<AppState>>();
     ensure_vpn_allows_transfers(&state)?;
@@ -188,10 +227,12 @@ pub async fn add_source(app: &AppHandle, source: String) -> Result<usize, String
         AddTorrent::from_local_filename(&trimmed).map_err(|e| format!("{e:#}"))?
     };
 
-    let output_folder = state.settings.read().download_dir.clone();
+    // Give every torrent its own folder named after it. Leaving output_folder
+    // unset keeps the session's download dir as the base; sub_folder nests one
+    // level under it. Falls back to librqbit's default when the name is unknown.
     let opts = AddTorrentOptions {
         overwrite: true,
-        output_folder: Some(output_folder.to_string_lossy().to_string()),
+        sub_folder: torrent_subfolder(&trimmed),
         ..Default::default()
     };
 
