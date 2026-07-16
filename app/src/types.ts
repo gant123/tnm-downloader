@@ -76,6 +76,7 @@ export interface Settings {
   nord_user: string;
   nord_pass: string;
   vpn_adapter_name: string;
+  nord_token: string;
   keep_seeding: string[];
 }
 
@@ -83,6 +84,14 @@ export interface VpnStatus {
   protected: boolean;
   mode: VpnMode;
   detail: string;
+}
+
+export interface WgSetupResult {
+  config_path: string;
+  tunnel_name: string;
+  server_hostname: string;
+  country: string;
+  wireguard_installed: boolean;
 }
 
 export type Filter =

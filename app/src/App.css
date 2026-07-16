@@ -720,6 +720,24 @@ body {
   gap: 12px;
 }
 
+.wg-result {
+  border: 1px solid rgba(61, 220, 132, 0.35);
+  background: rgba(61, 220, 132, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wg-result code {
+  font-family: Consolas, monospace;
+  background: var(--bg2);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
 .toast {
   position: fixed;
   bottom: 44px;

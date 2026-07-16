@@ -4,6 +4,7 @@ import type {
   TorrentDetail,
   TorrentRow,
   VpnStatus,
+  WgSetupResult,
 } from "./types";
 
 export const listTorrents = () => invoke<TorrentRow[]>("list_torrents");
@@ -23,4 +24,7 @@ export const getSettings = () => invoke<Settings>("get_settings");
 export const saveSettings = (settings: Settings) =>
   invoke("save_settings", { settings });
 export const getVpnStatus = () => invoke<VpnStatus>("get_vpn_status");
+export const setupNordWireguard = (token: string) =>
+  invoke<WgSetupResult>("setup_nord_wireguard", { token });
+export const openWireguardConfig = () => invoke("open_wireguard_config");
 export const openDownloadFolder = () => invoke("open_download_folder");

@@ -34,6 +34,8 @@ pub struct Settings {
     pub nord_pass: String,
     /// Adapter mode: substring matched case-insensitively against adapter names.
     pub vpn_adapter_name: String,
+    /// Nord access token for the self-managed WireGuard tunnel (no NordVPN app).
+    pub nord_token: String,
     /// Info-hashes the user chose to keep seeding after completion.
     pub keep_seeding: Vec<String>,
 }
@@ -53,6 +55,7 @@ impl Default for Settings {
             nord_user: String::new(),
             nord_pass: String::new(),
             vpn_adapter_name: "NordLynx".to_string(),
+            nord_token: String::new(),
             keep_seeding: Vec::new(),
         }
     }

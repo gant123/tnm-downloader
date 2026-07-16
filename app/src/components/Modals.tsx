@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
-import type { Settings } from "../types";
+import * as api from "../api";
+import type { Settings, WgSetupResult } from "../types";
 
 export function AddMagnetModal({
   onAdd,
@@ -91,6 +92,10 @@ export function SettingsModal({
   const [form, setForm] = useState<Settings>({ ...settings });
   const [version, setVersion] = useState("");
   const [checking, setChecking] = useState(false);
+  const [wgToken, setWgToken] = useState(settings.nord_token || "");
+  const [wgBusy, setWgBusy] = useState(false);
+  const [wgResult, setWgResult] = useState<WgSetupResult | null>(null);
+  const [wgError, setWgError] = useState<string | null>(null);
   useEffect(() => setForm({ ...settings }), [settings]);
   useEffect(() => {
     getVersion().then(setVersion).catch(() => {});
@@ -101,6 +106,22 @@ export function SettingsModal({
   const pickFolder = async () => {
     const dir = await open({ directory: true });
     if (typeof dir === "string") set("download_dir", dir);
+  };
+
+  const setupWireguard = async () => {
+    setWgBusy(true);
+    setWgError(null);
+    setWgResult(null);
+    try {
+      const r = await api.setupNordWireguard(wgToken.trim());
+      setWgResult(r);
+      // Reflect the mode switch the backend just made.
+      setForm((f) => ({ ...f, vpn_mode: "adapter", vpn_adapter_name: r.tunnel_name }));
+    } catch (e) {
+      setWgError(String(e));
+    } finally {
+      setWgBusy(false);
+    }
   };
 
   const check = async () => {
@@ -236,6 +257,57 @@ export function SettingsModal({
               value={form.vpn_adapter_name}
               onChange={(e) => set("vpn_adapter_name", e.target.value)}
             />
+          </div>
+        )}
+
+        <h4>NordVPN WireGuard — full tunnel, no app (best for hard-to-find torrents)</h4>
+        <p className="dim-text">
+          A real WireGuard tunnel carries everything — including DHT and UDP —
+          so scarce torrents that stall in proxy mode complete. Needs the tiny{" "}
+          <a href="https://www.wireguard.com/install/">WireGuard for Windows</a>{" "}
+          client (not the NordVPN app). Get an access token from{" "}
+          <a href="https://my.nordaccount.com/dashboard/nordvpn/manual-configuration/">
+            Nord Account → NordVPN → Set up manually
+          </a>
+          , paste it below, and set up.
+        </p>
+        <div className="form-row">
+          <label>Nord access token</label>
+          <div className="joined">
+            <input
+              type="password"
+              autoComplete="off"
+              placeholder="paste access token"
+              value={wgToken}
+              onChange={(e) => setWgToken(e.target.value)}
+            />
+            <button
+              className="btn primary"
+              onClick={setupWireguard}
+              disabled={wgBusy || !wgToken.trim()}
+            >
+              {wgBusy ? "Setting up…" : "Set up tunnel"}
+            </button>
+          </div>
+        </div>
+        {wgError && <p className="dim-text" style={{ color: "var(--red)" }}>{wgError}</p>}
+        {wgResult && (
+          <div className="wg-result">
+            <p>
+              ✓ Config written for <strong>{wgResult.server_hostname}</strong>
+              {wgResult.country ? ` (${wgResult.country})` : ""}. Switched to the{" "}
+              <code>{wgResult.tunnel_name}</code> tunnel with the kill switch.
+            </p>
+            <p className="dim-text">
+              Now activate it once: open WireGuard for Windows → Import tunnel(s)
+              from file → pick the config below → Activate. WireGuard remembers it
+              and reconnects automatically after that.
+              {!wgResult.wireguard_installed &&
+                " (WireGuard for Windows isn't installed yet — grab it from wireguard.com/install first.)"}
+            </p>
+            <button className="btn" onClick={() => api.openWireguardConfig().catch(() => {})}>
+              Open config file
+            </button>
           </div>
         )}
 

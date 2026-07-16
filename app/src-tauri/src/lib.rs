@@ -1,6 +1,7 @@
 mod config;
 mod engine;
 mod vpn;
+mod wireguard;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -110,6 +111,8 @@ pub fn run() {
             engine::get_settings,
             engine::save_settings,
             engine::get_vpn_status,
+            engine::setup_nord_wireguard,
+            engine::open_wireguard_config,
             engine::open_download_folder,
         ])
         .run(tauri::generate_context!())

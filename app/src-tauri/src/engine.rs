@@ -470,10 +470,13 @@ pub async fn save_settings(
     let needs_rebuild = {
         let mut current = state.settings.write();
         let needs_rebuild = current.engine_config_changed(&settings);
-        // keep_seeding is managed through set_keep_seeding, not the settings form
+        // keep_seeding and nord_token are managed by their own commands, not the
+        // settings form — preserve them across a form save.
         let keep = current.keep_seeding.clone();
+        let token = current.nord_token.clone();
         *current = settings;
         current.keep_seeding = keep;
+        current.nord_token = token;
         current
             .save(&state.settings_path)
             .map_err(|e| format!("{e:#}"))?;
@@ -504,6 +507,53 @@ pub async fn save_settings(
 #[tauri::command]
 pub fn get_vpn_status(state: State<'_, Arc<AppState>>) -> VpnStatus {
     state.vpn.lock().clone()
+}
+
+/// Set up the self-managed Nord WireGuard tunnel from an access token: fetch
+/// the key + server, write the config, (try to) activate it, and switch TNM to
+/// adapter mode watching that tunnel so all traffic — DHT and UDP included —
+/// rides the WireGuard link with the kill switch guarding it.
+#[tauri::command]
+pub async fn setup_nord_wireguard(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    token: String,
+) -> Result<crate::wireguard::WgSetupResult, String> {
+    let config_dir = state
+        .settings_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| "no config directory".to_string())?;
+
+    let result = crate::wireguard::setup(&token, &config_dir).await?;
+
+    {
+        let mut s = state.settings.write();
+        s.nord_token = token.trim().to_string();
+        s.vpn_mode = crate::config::VpnMode::Adapter;
+        s.vpn_adapter_name = crate::wireguard::TUNNEL_NAME.to_string();
+        s.save(&state.settings_path).map_err(|e| format!("{e:#}"))?;
+    }
+
+    // Switch the engine off the SOCKS proxy and onto the (now full-tunnel) link.
+    rebuild_session(&app).await?;
+    let status = vpn::check(&state.settings.read());
+    *state.vpn.lock() = status.clone();
+    let _ = app.emit("vpn-status", status);
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn open_wireguard_config(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let dir = state
+        .settings_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| "no config directory".to_string())?;
+    let conf = dir.join(format!("{}.conf", crate::wireguard::TUNNEL_NAME));
+    tauri_plugin_opener::open_path(conf.to_string_lossy().to_string(), None::<String>)
+        .map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
