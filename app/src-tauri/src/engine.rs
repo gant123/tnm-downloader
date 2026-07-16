@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use librqbit::{
-    api::TorrentIdOrHash, limits::LimitsConfig, torrent_from_bytes, AddTorrent, AddTorrentOptions,
-    ByteBufOwned, Magnet, ManagedTorrent, Session, SessionOptions, SessionPersistenceConfig,
+    api::TorrentIdOrHash, limits::LimitsConfig, torrent_from_bytes, torrent_from_bytes_ext,
+    AddTorrent, AddTorrentOptions, ByteBufOwned, Magnet, ManagedTorrent, Session, SessionOptions,
+    SessionPersistenceConfig,
 };
 use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
@@ -16,13 +17,26 @@ use tauri_plugin_notification::NotificationExt;
 use crate::config::Settings;
 use crate::vpn::{self, VpnStatus};
 
-/// Best-effort HTTP(S) trackers added in proxy mode, where UDP trackers and
-/// DHT are disabled to prevent leaks and most magnets carry only UDP trackers.
+/// Live public HTTP/HTTPS trackers injected in proxy mode. These are the only
+/// tracker type that works through a SOCKS5 proxy (UDP can't), so a broad list
+/// maximizes the chance of finding peers without ever leaving the tunnel. Once
+/// even one peer is found, PEX (which rides the proxied peer connections)
+/// discovers the rest.
 const PROXY_MODE_HTTP_TRACKERS: &[&str] = &[
     "http://tracker.opentrackr.org:1337/announce",
+    "https://tracker.opentrackr.org:443/announce",
+    "http://open.tracker.cl:1337/announce",
     "http://tracker.files.fm:6969/announce",
     "http://tracker.bt4g.com:2095/announce",
+    "http://bt.okmp3.ru:2710/announce",
+    "http://tracker.mywaifu.best:6969/announce",
     "https://tracker.gbitt.info:443/announce",
+    "https://tracker.tamersunion.org:443/announce",
+    "https://tracker1.520.jp:443/announce",
+    "https://tracker.loligirl.cn:443/announce",
+    "https://opentracker.i2p.rocks:443/announce",
+    "https://tracker.moeblog.cn:443/announce",
+    "https://tr.burnabyhighstar.com:443/announce",
 ];
 
 pub struct AppState {
@@ -215,16 +229,101 @@ fn torrent_subfolder(source: &str) -> Option<String> {
     raw.and_then(|n| sanitize_folder_name(&n))
 }
 
+/// Rebuild a magnet URL keeping only http(s) `tr` trackers. UDP trackers can't
+/// traverse a SOCKS5 proxy — librqbit would announce them over the raw
+/// connection, leaking the real IP — so in proxy mode they must be dropped.
+/// All other magnet params are preserved untouched.
+fn strip_udp_trackers_from_magnet(url: &str) -> String {
+    let Some((base, query)) = url.split_once('?') else {
+        return url.to_string();
+    };
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|param| match param.strip_prefix("tr=") {
+            // `tr` values are URL-encoded; http%3A / https%3A survive, udp%3A drops.
+            Some(v) => {
+                let v = v.to_ascii_lowercase();
+                v.starts_with("http")
+            }
+            None => true,
+        })
+        .collect();
+    format!("{base}?{}", kept.join("&"))
+}
+
+/// Re-encode a .torrent file keeping only http(s) trackers, so nothing
+/// announces off-proxy. The raw `info` dict bytes are spliced back verbatim,
+/// so the info-hash is unchanged. Returns None if parsing fails (caller then
+/// uses the original bytes).
+fn torrent_http_only_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
+    let parsed = torrent_from_bytes_ext::<ByteBufOwned>(bytes).ok()?;
+    let mut http: Vec<String> = Vec::new();
+    let mut push_if_http = |raw: &[u8]| {
+        if let Ok(s) = std::str::from_utf8(raw) {
+            let low = s.to_ascii_lowercase();
+            if (low.starts_with("http://") || low.starts_with("https://"))
+                && !http.iter().any(|x| x == s)
+            {
+                http.push(s.to_string());
+            }
+        }
+    };
+    if let Some(a) = parsed.meta.announce.as_ref() {
+        push_if_http(a.0.as_ref());
+    }
+    for tier in &parsed.meta.announce_list {
+        for t in tier {
+            push_if_http(t.0.as_ref());
+        }
+    }
+
+    // Bencode dict, keys sorted: "announce-list" (optional) then "info". The
+    // info value is the original bytes verbatim — never re-encoded.
+    let info = parsed.info_bytes.0;
+    let mut out = Vec::with_capacity(info.len() + 512);
+    out.push(b'd');
+    if !http.is_empty() {
+        out.extend_from_slice(b"13:announce-listll");
+        for t in &http {
+            out.extend_from_slice(format!("{}:", t.len()).as_bytes());
+            out.extend_from_slice(t.as_bytes());
+        }
+        out.extend_from_slice(b"ee");
+    }
+    out.extend_from_slice(b"4:info");
+    out.extend_from_slice(info.as_ref());
+    out.push(b'e');
+    Some(out)
+}
+
 pub async fn add_source(app: &AppHandle, source: String) -> Result<usize, String> {
     let state = app.state::<Arc<AppState>>();
     ensure_vpn_allows_transfers(&state)?;
     let session = state.session()?;
 
+    // In proxy mode, strip udp:// trackers so every announce rides the SOCKS5
+    // proxy (udp can't) and nothing leaks the real IP.
+    let proxied = state.settings.read().socks_url().is_some();
+
     let trimmed = source.trim().to_string();
-    let add = if trimmed.starts_with("magnet:") || trimmed.starts_with("http") {
+    let add = if trimmed.starts_with("magnet:") {
+        let src = if proxied {
+            strip_udp_trackers_from_magnet(&trimmed)
+        } else {
+            trimmed.clone()
+        };
+        AddTorrent::from_url(src)
+    } else if trimmed.starts_with("http") {
+        // Remote .torrent URL — fetched through the proxied client by librqbit.
         AddTorrent::from_url(trimmed.clone())
     } else {
-        AddTorrent::from_local_filename(&trimmed).map_err(|e| format!("{e:#}"))?
+        let bytes = std::fs::read(&trimmed).map_err(|e| format!("{e:#}"))?;
+        let bytes = if proxied {
+            torrent_http_only_bytes(&bytes).unwrap_or(bytes)
+        } else {
+            bytes
+        };
+        AddTorrent::TorrentFileBytes(bytes.into())
     };
 
     // Give every torrent its own folder named after it. Leaving output_folder
@@ -525,4 +624,64 @@ pub fn spawn_vpn_watcher(app: AppHandle) {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use librqbit::torrent_from_bytes_ext;
+
+    fn bstr(s: &str) -> Vec<u8> {
+        let mut v = format!("{}:", s.len()).into_bytes();
+        v.extend_from_slice(s.as_bytes());
+        v
+    }
+
+    // Minimal single-file torrent: announce-list with one udp + one http
+    // tracker, and a valid info dict.
+    fn sample_torrent() -> Vec<u8> {
+        let info = b"d6:lengthi100e4:name4:test12:piece lengthi16384e6:pieces20:AAAAAAAAAAAAAAAAAAAAe";
+        let mut t = Vec::new();
+        t.extend_from_slice(b"d13:announce-listll");
+        t.extend(bstr("udp://tracker.opentrackr.org:1337/announce"));
+        t.extend(bstr("https://tracker.gbitt.info/announce"));
+        t.extend_from_slice(b"ee");
+        t.extend_from_slice(b"4:info");
+        t.extend_from_slice(info);
+        t.push(b'e');
+        t
+    }
+
+    #[test]
+    fn http_only_preserves_infohash_and_drops_udp() {
+        let original = sample_torrent();
+        let before = torrent_from_bytes_ext::<ByteBufOwned>(&original).unwrap();
+
+        let filtered = torrent_http_only_bytes(&original).expect("re-encode");
+        let after = torrent_from_bytes_ext::<ByteBufOwned>(&filtered).expect("parse re-encoded");
+
+        // Info-hash must be unchanged (info dict spliced verbatim).
+        assert_eq!(before.meta.info_hash, after.meta.info_hash);
+
+        // No udp trackers survive; the http one does.
+        let trackers: Vec<String> = after
+            .meta
+            .announce_list
+            .iter()
+            .flatten()
+            .map(|b| String::from_utf8_lossy(b.0.as_ref()).into_owned())
+            .collect();
+        assert!(trackers.iter().all(|t| !t.starts_with("udp://")), "udp leaked: {trackers:?}");
+        assert!(trackers.iter().any(|t| t.starts_with("https://")), "http tracker dropped: {trackers:?}");
+    }
+
+    #[test]
+    fn magnet_strip_keeps_http_drops_udp() {
+        let m = "magnet:?xt=urn:btih:abc&dn=Thing&tr=udp%3A%2F%2Ftracker.x%3A1337&tr=https%3A%2F%2Ftracker.y%2Fannounce";
+        let out = strip_udp_trackers_from_magnet(m);
+        assert!(out.contains("xt=urn:btih:abc"));
+        assert!(out.contains("dn=Thing"));
+        assert!(out.contains("tr=https%3A"));
+        assert!(!out.contains("udp%3A"), "udp survived: {out}");
+    }
 }
