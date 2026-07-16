@@ -113,3 +113,13 @@ TNM/
   space→dot asset rename), tags, and publishes the GitHub release.
 - Note: minisign ≠ Authenticode, so SmartScreen warns on first manual install
   (not on auto-updates). An OS code-signing cert is a future step.
+
+## Download layout (v0.2.0, 2026-07-16)
+
+Every torrent downloads into its own subfolder named after the torrent
+(`download_dir/<torrent name>/…`), single- and multi-file alike. Implemented in
+`engine.rs::add_source` by deriving the name at add-time (magnet `dn` or
+`.torrent` `info.name`) and passing it as librqbit's `sub_folder`, rather than
+overriding `output_folder` (which bypassed librqbit's subfolder logic and
+dumped multi-file torrents loose). Remote `.torrent` URLs, whose name isn't
+known until fetched, fall back to librqbit's default (still wraps multi-file).
