@@ -136,3 +136,18 @@ see `torrent_http_only_bytes`). Peer discovery through the proxy then relies on
 a broad injected HTTP/HTTPS tracker list (`PROXY_MODE_HTTP_TRACKERS`) plus PEX,
 which rides the already-proxied peer connections. DHT stays disabled (UDP).
 Unit tests in engine.rs cover the infohash-preserving re-encode and magnet strip.
+
+## NordVPN WireGuard mode — full tunnel, no app (v0.3.0, 2026-07-16)
+
+SOCKS5 is TCP-only, so proxy mode can't carry DHT/UDP — scarce torrents that
+depend on them (cracks/repacks) stall. `wireguard.rs` adds a full-tunnel option
+that carries everything: given a Nord access token (Nord Account → NordVPN →
+Set up manually), it calls Nord's API for the NordLynx private key
+(`/v1/users/services/credentials`, basic auth user "token") and a recommended
+wireguard server (`/v1/servers/recommendations?...wireguard_udp`), writes a
+standard `tnm-nord.conf` (AllowedIPs 0.0.0.0/0), and switches TNM to adapter
+mode watching that tunnel. The user imports+activates the config once in the
+official WireGuard for Windows client (handles elevation); TNM's existing kill
+switch guards it. Full tunnel → DHT/UDP flow → torrents complete, all behind
+Nord, no NordVPN app. Nord token stored in settings (plaintext, like the SOCKS
+creds — Credential Manager is a future polish). Config gen is unit-tested.
