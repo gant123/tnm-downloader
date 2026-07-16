@@ -1,0 +1,21 @@
+# dependencies
+node_modules/
+app/node_modules/
+
+# build output
+dist/
+app/dist/
+app/src-tauri/target/
+app/src-tauri/gen/schemas/
+
+# signing keys — NEVER commit these
+*.key
+*.key.pub
+
+# release artifacts staged locally
+latest.json
+
+# misc
+.DS_Store
+*.log
+Thumbs.db
