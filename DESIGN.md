@@ -94,3 +94,22 @@ TNM/
     ├── src/             ← React frontend
     └── src-tauri/       ← Rust backend (librqbit session, VPN watcher)
 ```
+
+## Distribution & auto-update (added 2026-07-16)
+
+- Packaged as a signed Windows NSIS installer (`bundle.targets: ["nsis"]`,
+  `createUpdaterArtifacts: true`, per-user install, no UAC on update).
+- Public repo: https://github.com/gant123/tnm-downloader (source + releases).
+- Auto-updater (`tauri-plugin-updater` + `tauri-plugin-process`): on launch the
+  app polls `releases/latest/download/latest.json`, and shows a non-blocking
+  banner when a newer signed version exists. Clicking it pauses active
+  torrents, downloads, verifies the minisign signature against the embedded
+  pubkey, installs, and relaunches. Settings has a manual "Check for updates".
+- Signing key: `~/.tauri/tnm-downloader.key` (minisign, no passphrase). NEVER
+  committed (gitignored). **Back this up** — losing it means no future update
+  can be verified by installed copies.
+- Cut a release with `scripts/release.ps1 -Version X.Y.Z -Notes "..."` — it
+  bumps versions, builds+signs, writes `latest.json` (handling GitHub's
+  space→dot asset rename), tags, and publishes the GitHub release.
+- Note: minisign ≠ Authenticode, so SmartScreen warns on first manual install
+  (not on auto-updates). An OS code-signing cert is a future step.
