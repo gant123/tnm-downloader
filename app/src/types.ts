@@ -61,37 +61,27 @@ export interface TorrentDetail {
   files: FileRow[];
 }
 
-export type VpnMode = "proxy" | "adapter";
+export type ProxyType = "none" | "socks5";
 
 export interface Settings {
   download_dir: string;
-  strict_vpn: boolean;
-  auto_resume_on_reconnect: boolean;
   stop_on_complete: boolean;
   upload_limit_kib: number;
   download_limit_kib: number;
-  vpn_mode: VpnMode;
-  nord_socks_host: string;
-  nord_socks_port: number;
-  nord_user: string;
-  nord_pass: string;
-  vpn_adapter_name: string;
-  nord_token: string;
+  proxy_type: ProxyType;
+  proxy_host: string;
+  proxy_port: number;
+  proxy_user: string;
+  proxy_pass: string;
+  proxy_kill_switch: boolean;
+  auto_resume_on_reconnect: boolean;
   keep_seeding: string[];
 }
 
-export interface VpnStatus {
-  protected: boolean;
-  mode: VpnMode;
+export interface ProxyStatus {
+  proxy_enabled: boolean;
+  ok: boolean;
   detail: string;
-}
-
-export interface WgSetupResult {
-  config_path: string;
-  tunnel_name: string;
-  server_hostname: string;
-  country: string;
-  wireguard_installed: boolean;
 }
 
 export type Filter =

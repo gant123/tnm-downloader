@@ -15,7 +15,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
 
 use crate::config::Settings;
-use crate::vpn::{self, VpnStatus};
+use crate::vpn::{self, ProxyStatus};
 
 /// Live public HTTP/HTTPS trackers injected in proxy mode. These are the only
 /// tracker type that works through a SOCKS5 proxy (UDP can't), so a broad list
@@ -45,7 +45,7 @@ pub struct AppState {
     pub settings: RwLock<Settings>,
     pub settings_path: PathBuf,
     pub session_dir: PathBuf,
-    pub vpn: Mutex<VpnStatus>,
+    pub proxy_status: Mutex<ProxyStatus>,
     /// Torrent ids the kill switch paused, to auto-resume on reconnect.
     pub killswitch_paused: Mutex<HashSet<usize>>,
     /// finished-flag per torrent id from the previous stats tick, to detect completions.
@@ -179,13 +179,18 @@ fn get_handle(state: &AppState, id: usize) -> Result<Arc<ManagedTorrent>, String
         .ok_or_else(|| format!("torrent {id} not found"))
 }
 
-fn ensure_vpn_allows_transfers(state: &AppState) -> Result<(), String> {
-    let strict = state.settings.read().strict_vpn;
-    if strict && !state.vpn.lock().protected {
-        let detail = state.vpn.lock().detail.clone();
-        return Err(format!(
-            "Protection is not active ({detail}). Strict mode is blocking transfers — fix the VPN setup or turn off strict mode in settings."
-        ));
+/// Transfers are allowed unless the user opted into the kill switch AND a proxy
+/// is configured AND it's currently unreachable. Direct mode never blocks.
+fn ensure_transfers_allowed(state: &AppState) -> Result<(), String> {
+    let s = state.settings.read();
+    if s.proxy_kill_switch && s.proxy_enabled() {
+        let status = state.proxy_status.lock();
+        if status.proxy_enabled && !status.ok {
+            return Err(format!(
+                "Kill switch is on and the proxy is unreachable ({}). Transfers are paused until it's back — or turn off the kill switch in settings.",
+                status.detail
+            ));
+        }
     }
     Ok(())
 }
@@ -298,7 +303,7 @@ fn torrent_http_only_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
 
 pub async fn add_source(app: &AppHandle, source: String) -> Result<usize, String> {
     let state = app.state::<Arc<AppState>>();
-    ensure_vpn_allows_transfers(&state)?;
+    ensure_transfers_allowed(&state)?;
     let session = state.session()?;
 
     // In proxy mode, strip udp:// trackers so every announce rides the SOCKS5
@@ -366,7 +371,7 @@ pub async fn pause_torrent(state: State<'_, Arc<AppState>>, id: usize) -> Result
 
 #[tauri::command]
 pub async fn resume_torrent(state: State<'_, Arc<AppState>>, id: usize) -> Result<(), String> {
-    ensure_vpn_allows_transfers(&state)?;
+    ensure_transfers_allowed(&state)?;
     let session = state.session()?;
     let handle = get_handle(&state, id)?;
     state.killswitch_paused.lock().remove(&id);
@@ -470,13 +475,10 @@ pub async fn save_settings(
     let needs_rebuild = {
         let mut current = state.settings.write();
         let needs_rebuild = current.engine_config_changed(&settings);
-        // keep_seeding and nord_token are managed by their own commands, not the
-        // settings form — preserve them across a form save.
+        // keep_seeding is managed by its own command, not the settings form.
         let keep = current.keep_seeding.clone();
-        let token = current.nord_token.clone();
         *current = settings;
         current.keep_seeding = keep;
-        current.nord_token = token;
         current
             .save(&state.settings_path)
             .map_err(|e| format!("{e:#}"))?;
@@ -495,8 +497,8 @@ pub async fn save_settings(
     }
 
     let status = vpn::check(&state.settings.read());
-    *state.vpn.lock() = status.clone();
-    let _ = app.emit("vpn-status", status);
+    *state.proxy_status.lock() = status.clone();
+    let _ = app.emit("proxy-status", status);
 
     if needs_rebuild {
         rebuild_session(&app).await?;
@@ -505,55 +507,8 @@ pub async fn save_settings(
 }
 
 #[tauri::command]
-pub fn get_vpn_status(state: State<'_, Arc<AppState>>) -> VpnStatus {
-    state.vpn.lock().clone()
-}
-
-/// Set up the self-managed Nord WireGuard tunnel from an access token: fetch
-/// the key + server, write the config, (try to) activate it, and switch TNM to
-/// adapter mode watching that tunnel so all traffic — DHT and UDP included —
-/// rides the WireGuard link with the kill switch guarding it.
-#[tauri::command]
-pub async fn setup_nord_wireguard(
-    app: AppHandle,
-    state: State<'_, Arc<AppState>>,
-    token: String,
-) -> Result<crate::wireguard::WgSetupResult, String> {
-    let config_dir = state
-        .settings_path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .ok_or_else(|| "no config directory".to_string())?;
-
-    let result = crate::wireguard::setup(&token, &config_dir).await?;
-
-    {
-        let mut s = state.settings.write();
-        s.nord_token = token.trim().to_string();
-        s.vpn_mode = crate::config::VpnMode::Adapter;
-        s.vpn_adapter_name = crate::wireguard::TUNNEL_NAME.to_string();
-        s.save(&state.settings_path).map_err(|e| format!("{e:#}"))?;
-    }
-
-    // Switch the engine off the SOCKS proxy and onto the (now full-tunnel) link.
-    rebuild_session(&app).await?;
-    let status = vpn::check(&state.settings.read());
-    *state.vpn.lock() = status.clone();
-    let _ = app.emit("vpn-status", status);
-
-    Ok(result)
-}
-
-#[tauri::command]
-pub fn open_wireguard_config(state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    let dir = state
-        .settings_path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .ok_or_else(|| "no config directory".to_string())?;
-    let conf = dir.join(format!("{}.conf", crate::wireguard::TUNNEL_NAME));
-    tauri_plugin_opener::open_path(conf.to_string_lossy().to_string(), None::<String>)
-        .map_err(|e| format!("{e:#}"))
+pub fn get_proxy_status(state: State<'_, Arc<AppState>>) -> ProxyStatus {
+    state.proxy_status.lock().clone()
 }
 
 #[tauri::command]
@@ -610,56 +565,65 @@ pub fn spawn_stats_loop(app: AppHandle) {
     });
 }
 
-/// Every 2 seconds: recompute protection status. If protection is lost while
-/// strict mode is on, pause everything (kill switch). Optionally resume when
-/// protection returns.
-pub fn spawn_vpn_watcher(app: AppHandle) {
+/// Every ~4 seconds: recheck the proxy's reachability. Only if the user turned
+/// on the kill switch AND a proxy is configured AND it's unreachable do we pause
+/// torrents (torrents only — never the rest of the PC). Resume when it returns.
+/// In direct mode this does nothing that could ever block the user.
+pub fn spawn_proxy_watcher(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut first_check = true;
         loop {
             let state = app.state::<Arc<AppState>>().inner().clone();
-            let (settings, strict, auto_resume) = {
+            let (settings, kill_switch, auto_resume) = {
                 let s = state.settings.read();
-                (s.clone(), s.strict_vpn, s.auto_resume_on_reconnect)
+                (s.clone(), s.proxy_kill_switch, s.auto_resume_on_reconnect)
             };
-            let status = vpn::check(&settings);
+
+            // Reachability is a blocking TCP connect — keep it off the async pool.
+            let status = tokio::task::spawn_blocking(move || vpn::check(&settings))
+                .await
+                .unwrap_or(ProxyStatus {
+                    proxy_enabled: false,
+                    ok: true,
+                    detail: "Direct connection".into(),
+                });
+
             let changed = {
-                let mut cur = state.vpn.lock();
+                let mut cur = state.proxy_status.lock();
                 let changed = *cur != status;
                 *cur = status.clone();
                 changed
             };
-
             if changed || first_check {
-                let _ = app.emit("vpn-status", status.clone());
+                let _ = app.emit("proxy-status", status.clone());
             }
 
-            if !status.protected && strict {
+            let should_pause = kill_switch && status.proxy_enabled && !status.ok;
+            if should_pause {
                 if let Ok(session) = state.session() {
                     let handles: Vec<(usize, Arc<ManagedTorrent>)> =
                         session.with_torrents(|it| it.map(|(id, h)| (id, h.clone())).collect());
                     let mut paused_any = false;
                     for (id, handle) in handles {
-                        if !handle.is_paused() {
-                            if session.pause(&handle).await.is_ok() {
-                                state.killswitch_paused.lock().insert(id);
-                                paused_any = true;
-                            }
+                        if !handle.is_paused() && session.pause(&handle).await.is_ok() {
+                            state.killswitch_paused.lock().insert(id);
+                            paused_any = true;
                         }
                     }
                     if paused_any {
                         let _ = app
                             .notification()
                             .builder()
-                            .title("Protection lost — transfers paused")
-                            .body("TNM paused all torrents because VPN protection went down.")
+                            .title("Proxy unreachable — transfers paused")
+                            .body("The kill switch paused your torrents. Your internet is unaffected.")
                             .show();
                         let _ = app.emit("torrents-update", all_rows(&state));
                     }
                 }
             }
 
-            if status.protected && changed && auto_resume {
+            let recovered = status.ok && changed && auto_resume;
+            if recovered {
                 if let Ok(session) = state.session() {
                     let ids: Vec<usize> = state.killswitch_paused.lock().drain().collect();
                     for id in ids {
@@ -671,7 +635,7 @@ pub fn spawn_vpn_watcher(app: AppHandle) {
             }
 
             first_check = false;
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(4)).await;
         }
     });
 }

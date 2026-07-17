@@ -3,10 +3,10 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { Update } from "@tauri-apps/plugin-updater";
-import { ArrowDown, ArrowUp, Download, ShieldCheck, ShieldOff, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, Globe, ShieldAlert, ShieldCheck, X } from "lucide-react";
 
 import * as api from "./api";
-import type { Filter, Settings, TorrentRow, VpnStatus } from "./types";
+import type { Filter, ProxyStatus, Settings, TorrentRow } from "./types";
 import { formatSpeed } from "./format";
 import { checkForUpdate, installUpdate } from "./updater";
 import Header from "./components/Header";
@@ -18,7 +18,7 @@ import "./App.css";
 
 export default function App() {
   const [torrents, setTorrents] = useState<TorrentRow[]>([]);
-  const [vpn, setVpn] = useState<VpnStatus | null>(null);
+  const [status, setStatus] = useState<ProxyStatus | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
@@ -76,14 +76,14 @@ export default function App() {
 
   useEffect(() => {
     api.listTorrents().then(setTorrents).catch(() => {});
-    api.getVpnStatus().then(setVpn).catch(() => {});
+    api.getProxyStatus().then(setStatus).catch(() => {});
     api.getSettings().then(setSettings).catch(() => {});
     checkForUpdate().then((u) => u && setUpdate(u)).catch(() => {});
 
     const unTorrents = listen<TorrentRow[]>("torrents-update", (e) =>
       setTorrents(e.payload),
     );
-    const unVpn = listen<VpnStatus>("vpn-status", (e) => setVpn(e.payload));
+    const unVpn = listen<ProxyStatus>("proxy-status", (e) => setStatus(e.payload));
     const unDrop = getCurrentWebview().onDragDropEvent((event) => {
       if (event.payload.type === "drop") {
         for (const p of event.payload.paths) {
@@ -168,7 +168,7 @@ export default function App() {
         </div>
       )}
       <Header
-        vpn={vpn}
+        status={status}
         search={search}
         onSearch={setSearch}
         onAddFile={addTorrentFile}
@@ -221,9 +221,19 @@ export default function App() {
           <ArrowUp size={13} /> {formatSpeed(totals.up)}
         </span>
         <span className="stat dim">{torrents.length} torrents</span>
-        <span className={`stat vpn-note ${vpn?.protected ? "okc" : "badc"}`}>
-          {vpn?.protected ? <ShieldCheck size={13} /> : <ShieldOff size={13} />}
-          {vpn?.detail ?? "Checking protection…"}
+        <span
+          className={`stat vpn-note ${
+            !status?.proxy_enabled ? "neutral" : status?.ok ? "okc" : "badc"
+          }`}
+        >
+          {!status?.proxy_enabled ? (
+            <Globe size={13} />
+          ) : status?.ok ? (
+            <ShieldCheck size={13} />
+          ) : (
+            <ShieldAlert size={13} />
+          )}
+          {status?.detail ?? "Direct connection"}
         </span>
       </footer>
 

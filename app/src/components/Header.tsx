@@ -1,9 +1,17 @@
-import { FolderOpen, Link, Plus, Settings as SettingsIcon, ShieldCheck, ShieldOff } from "lucide-react";
-import type { VpnStatus } from "../types";
+import {
+  FolderOpen,
+  Globe,
+  Link,
+  Plus,
+  Settings as SettingsIcon,
+  ShieldAlert,
+  ShieldCheck,
+} from "lucide-react";
+import type { ProxyStatus } from "../types";
 import logo from "../assets/logo.png";
 
 interface Props {
-  vpn: VpnStatus | null;
+  status: ProxyStatus | null;
   search: string;
   onSearch: (v: string) => void;
   onAddFile: () => void;
@@ -13,12 +21,14 @@ interface Props {
 }
 
 export default function Header(p: Props) {
-  const vpnOk = p.vpn?.protected ?? false;
-  const vpnLabel = vpnOk
-    ? p.vpn?.mode === "proxy"
-      ? "Nord proxy · Protected"
-      : "VPN · Protected"
-    : "Unprotected · Set up";
+  const s = p.status;
+  const direct = !s?.proxy_enabled;
+  const cls = direct ? "neutral" : s?.ok ? "ok" : "bad";
+  const label = direct
+    ? "Direct"
+    : s?.ok
+      ? "Proxy on"
+      : "Proxy down";
   return (
     <header className="header">
       <div className="brand">
@@ -47,12 +57,18 @@ export default function Header(p: Props) {
       />
 
       <button
-        className={`vpn-pill ${vpnOk ? "ok" : "bad"}`}
-        onClick={() => !vpnOk && p.onOpenSettings()}
-        title={p.vpn?.detail ?? ""}
+        className={`vpn-pill ${cls}`}
+        onClick={p.onOpenSettings}
+        title={s?.detail ?? "Direct connection (no proxy)"}
       >
-        {vpnOk ? <ShieldCheck size={15} /> : <ShieldOff size={15} />}
-        {vpnLabel}
+        {direct ? (
+          <Globe size={15} />
+        ) : s?.ok ? (
+          <ShieldCheck size={15} />
+        ) : (
+          <ShieldAlert size={15} />
+        )}
+        {label}
       </button>
 
       <button className="btn ghost" onClick={p.onOpenSettings} title="Settings">

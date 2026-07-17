@@ -1,10 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ProxyStatus,
   Settings,
   TorrentDetail,
   TorrentRow,
-  VpnStatus,
-  WgSetupResult,
 } from "./types";
 
 export const listTorrents = () => invoke<TorrentRow[]>("list_torrents");
@@ -23,8 +22,5 @@ export const setKeepSeeding = (id: number, keep: boolean) =>
 export const getSettings = () => invoke<Settings>("get_settings");
 export const saveSettings = (settings: Settings) =>
   invoke("save_settings", { settings });
-export const getVpnStatus = () => invoke<VpnStatus>("get_vpn_status");
-export const setupNordWireguard = (token: string) =>
-  invoke<WgSetupResult>("setup_nord_wireguard", { token });
-export const openWireguardConfig = () => invoke("open_wireguard_config");
+export const getProxyStatus = () => invoke<ProxyStatus>("get_proxy_status");
 export const openDownloadFolder = () => invoke("open_download_folder");

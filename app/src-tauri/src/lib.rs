@@ -1,7 +1,6 @@
 mod config;
 mod engine;
 mod vpn;
-mod wireguard;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -69,19 +68,19 @@ pub fn run() {
                 session_dir.clone(),
             ))?;
 
-            let initial_vpn = vpn::check(&settings);
+            let initial_status = vpn::check(&settings);
             app.manage(Arc::new(AppState {
                 session: RwLock::new(Some(session)),
                 settings: RwLock::new(settings),
                 settings_path,
                 session_dir,
-                vpn: Mutex::new(initial_vpn),
+                proxy_status: Mutex::new(initial_status),
                 killswitch_paused: Mutex::new(HashSet::new()),
                 prev_finished: Mutex::new(HashMap::new()),
             }));
 
             engine::spawn_stats_loop(app.handle().clone());
-            engine::spawn_vpn_watcher(app.handle().clone());
+            engine::spawn_proxy_watcher(app.handle().clone());
 
             // magnet: links routed to us by the OS
             #[cfg(desktop)]
@@ -110,9 +109,7 @@ pub fn run() {
             engine::set_keep_seeding,
             engine::get_settings,
             engine::save_settings,
-            engine::get_vpn_status,
-            engine::setup_nord_wireguard,
-            engine::open_wireguard_config,
+            engine::get_proxy_status,
             engine::open_download_folder,
         ])
         .run(tauri::generate_context!())

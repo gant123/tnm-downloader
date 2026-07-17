@@ -1,41 +1,44 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// How torrent traffic is routed. Default is Direct — the app works on plain
+/// internet with nothing blocked. A proxy is entirely optional.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum VpnMode {
-    /// Route torrent traffic through NordVPN's SOCKS5 proxy servers using
-    /// Nord service credentials. Fully in-app, no NordVPN client needed.
-    Proxy,
-    /// Watch a system VPN adapter (e.g. NordLynx) and kill-switch on drop.
-    Adapter,
+pub enum ProxyType {
+    None,
+    Socks5,
+}
+
+impl Default for ProxyType {
+    fn default() -> Self {
+        ProxyType::None
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub download_dir: PathBuf,
-    /// Refuse to start/resume transfers unless VPN protection is active.
-    pub strict_vpn: bool,
-    /// Resume transfers the kill switch paused once protection returns.
-    pub auto_resume_on_reconnect: bool,
     /// Stop seeding the moment a download finishes.
     pub stop_on_complete: bool,
     /// 0 = unlimited, otherwise KiB/s.
     pub upload_limit_kib: u32,
     /// 0 = unlimited, otherwise KiB/s.
     pub download_limit_kib: u32,
-    pub vpn_mode: VpnMode,
-    /// NordVPN SOCKS5 endpoint, e.g. amsterdam.nl.socks.nordhold.net
-    pub nord_socks_host: String,
-    pub nord_socks_port: u16,
-    /// Nord "service credentials" (dashboard → NordVPN → manual setup).
-    pub nord_user: String,
-    pub nord_pass: String,
-    /// Adapter mode: substring matched case-insensitively against adapter names.
-    pub vpn_adapter_name: String,
-    /// Nord access token for the self-managed WireGuard tunnel (no NordVPN app).
-    pub nord_token: String,
+
+    // ---- Proxy (optional, Tixati-style). Default None = plain internet. ----
+    pub proxy_type: ProxyType,
+    pub proxy_host: String,
+    pub proxy_port: u16,
+    pub proxy_user: String,
+    pub proxy_pass: String,
+    /// Opt-in: pause all torrents if the proxy can't be reached. This only ever
+    /// pauses TORRENTS — it never touches the rest of your PC's internet.
+    pub proxy_kill_switch: bool,
+    /// Resume torrents the kill switch paused once the proxy is reachable again.
+    pub auto_resume_on_reconnect: bool,
+
     /// Info-hashes the user chose to keep seeding after completion.
     pub keep_seeding: Vec<String>,
 }
@@ -44,49 +47,53 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             download_dir: PathBuf::new(),
-            strict_vpn: true,
-            auto_resume_on_reconnect: true,
             stop_on_complete: true,
             upload_limit_kib: 0,
             download_limit_kib: 0,
-            vpn_mode: VpnMode::Proxy,
-            nord_socks_host: "amsterdam.nl.socks.nordhold.net".to_string(),
-            nord_socks_port: 1080,
-            nord_user: String::new(),
-            nord_pass: String::new(),
-            vpn_adapter_name: "NordLynx".to_string(),
-            nord_token: String::new(),
+            proxy_type: ProxyType::None,
+            proxy_host: String::new(),
+            proxy_port: 1080,
+            proxy_user: String::new(),
+            proxy_pass: String::new(),
+            proxy_kill_switch: false,
+            auto_resume_on_reconnect: true,
             keep_seeding: Vec::new(),
         }
     }
 }
 
 impl Settings {
-    pub fn proxy_configured(&self) -> bool {
-        !self.nord_socks_host.is_empty() && !self.nord_user.is_empty() && !self.nord_pass.is_empty()
+    /// A proxy is configured and should be used.
+    pub fn proxy_enabled(&self) -> bool {
+        self.proxy_type != ProxyType::None && !self.proxy_host.trim().is_empty()
     }
 
-    /// socks5://user:pass@host:port with credentials percent-encoded.
+    /// socks5://[user:pass@]host:port with credentials percent-encoded, or None
+    /// when running direct.
     pub fn socks_url(&self) -> Option<String> {
-        if self.vpn_mode != VpnMode::Proxy || !self.proxy_configured() {
+        if self.proxy_type != ProxyType::Socks5 || self.proxy_host.trim().is_empty() {
             return None;
         }
-        Some(format!(
-            "socks5://{}:{}@{}:{}",
-            pct(&self.nord_user),
-            pct(&self.nord_pass),
-            self.nord_socks_host,
-            self.nord_socks_port
-        ))
+        let host = self.proxy_host.trim();
+        if self.proxy_user.is_empty() {
+            Some(format!("socks5://{host}:{}", self.proxy_port))
+        } else {
+            Some(format!(
+                "socks5://{}:{}@{host}:{}",
+                pct(&self.proxy_user),
+                pct(&self.proxy_pass),
+                self.proxy_port
+            ))
+        }
     }
 
     /// Settings that require rebuilding the torrent session to take effect.
     pub fn engine_config_changed(&self, other: &Settings) -> bool {
-        self.vpn_mode != other.vpn_mode
-            || self.nord_socks_host != other.nord_socks_host
-            || self.nord_socks_port != other.nord_socks_port
-            || self.nord_user != other.nord_user
-            || self.nord_pass != other.nord_pass
+        self.proxy_type != other.proxy_type
+            || self.proxy_host != other.proxy_host
+            || self.proxy_port != other.proxy_port
+            || self.proxy_user != other.proxy_user
+            || self.proxy_pass != other.proxy_pass
             || self.download_dir != other.download_dir
     }
 

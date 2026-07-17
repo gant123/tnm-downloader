@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
-import * as api from "../api";
-import type { Settings, WgSetupResult } from "../types";
+import type { Settings } from "../types";
 
 export function AddMagnetModal({
   onAdd,
@@ -92,10 +91,6 @@ export function SettingsModal({
   const [form, setForm] = useState<Settings>({ ...settings });
   const [version, setVersion] = useState("");
   const [checking, setChecking] = useState(false);
-  const [wgToken, setWgToken] = useState(settings.nord_token || "");
-  const [wgBusy, setWgBusy] = useState(false);
-  const [wgResult, setWgResult] = useState<WgSetupResult | null>(null);
-  const [wgError, setWgError] = useState<string | null>(null);
   useEffect(() => setForm({ ...settings }), [settings]);
   useEffect(() => {
     getVersion().then(setVersion).catch(() => {});
@@ -106,22 +101,6 @@ export function SettingsModal({
   const pickFolder = async () => {
     const dir = await open({ directory: true });
     if (typeof dir === "string") set("download_dir", dir);
-  };
-
-  const setupWireguard = async () => {
-    setWgBusy(true);
-    setWgError(null);
-    setWgResult(null);
-    try {
-      const r = await api.setupNordWireguard(wgToken.trim());
-      setWgResult(r);
-      // Reflect the mode switch the backend just made.
-      setForm((f) => ({ ...f, vpn_mode: "adapter", vpn_adapter_name: r.tunnel_name }));
-    } catch (e) {
-      setWgError(String(e));
-    } finally {
-      setWgBusy(false);
-    }
   };
 
   const check = async () => {
@@ -178,44 +157,34 @@ export function SettingsModal({
           Stop seeding when a download completes
         </label>
 
-        <h4>NordVPN protection</h4>
+        <h4>Proxy (optional)</h4>
+        <p className="dim-text">
+          TNM runs on your normal internet by default — nothing is required.
+          Optionally route torrent traffic through a SOCKS5 proxy (e.g. a VPN's
+          SOCKS server). This affects only TNM, never the rest of your PC.
+        </p>
         <div className="form-row">
-          <label>Protection mode</label>
+          <label>Proxy</label>
           <select
-            value={form.vpn_mode}
-            onChange={(e) => set("vpn_mode", e.target.value as Settings["vpn_mode"])}
+            value={form.proxy_type}
+            onChange={(e) => set("proxy_type", e.target.value as Settings["proxy_type"])}
           >
-            <option value="proxy">Nord SOCKS5 proxy (built in — no NordVPN app needed)</option>
-            <option value="adapter">Watch a system VPN adapter (kill switch)</option>
+            <option value="none">None — direct connection</option>
+            <option value="socks5">SOCKS5</option>
           </select>
         </div>
 
-        {form.vpn_mode === "proxy" && (
+        {form.proxy_type === "socks5" && (
           <>
-            <p className="dim-text">
-              Uses your Nord service credentials (Nord Account dashboard → NordVPN →
-              Manual setup). Only TNM's traffic goes through Nord — nothing else on
-              your PC is touched. DHT is disabled in this mode so nothing can leak
-              around the proxy.
-            </p>
             <div className="form-row two">
               <div>
-                <label>Nord SOCKS5 server</label>
+                <label>Host</label>
                 <input
-                  list="nord-hosts"
-                  value={form.nord_socks_host}
-                  onChange={(e) => set("nord_socks_host", e.target.value)}
+                  autoComplete="off"
+                  placeholder="us.socks.nordhold.net"
+                  value={form.proxy_host}
+                  onChange={(e) => set("proxy_host", e.target.value)}
                 />
-                <datalist id="nord-hosts">
-                  <option value="amsterdam.nl.socks.nordhold.net" />
-                  <option value="nl.socks.nordhold.net" />
-                  <option value="se.socks.nordhold.net" />
-                  <option value="stockholm.se.socks.nordhold.net" />
-                  <option value="us.socks.nordhold.net" />
-                  <option value="atlanta.us.socks.nordhold.net" />
-                  <option value="dallas.us.socks.nordhold.net" />
-                  <option value="los-angeles.us.socks.nordhold.net" />
-                </datalist>
               </div>
               <div>
                 <label>Port</label>
@@ -223,110 +192,56 @@ export function SettingsModal({
                   type="number"
                   min={1}
                   max={65535}
-                  value={form.nord_socks_port}
-                  onChange={(e) => set("nord_socks_port", Number(e.target.value) || 1080)}
+                  value={form.proxy_port}
+                  onChange={(e) => set("proxy_port", Number(e.target.value) || 1080)}
                 />
               </div>
             </div>
             <div className="form-row two">
               <div>
-                <label>Service username</label>
+                <label>Username (optional)</label>
                 <input
                   autoComplete="off"
-                  value={form.nord_user}
-                  onChange={(e) => set("nord_user", e.target.value)}
+                  value={form.proxy_user}
+                  onChange={(e) => set("proxy_user", e.target.value)}
                 />
               </div>
               <div>
-                <label>Service password</label>
+                <label>Password (optional)</label>
                 <input
                   type="password"
                   autoComplete="off"
-                  value={form.nord_pass}
-                  onChange={(e) => set("nord_pass", e.target.value)}
+                  value={form.proxy_pass}
+                  onChange={(e) => set("proxy_pass", e.target.value)}
                 />
               </div>
             </div>
+            <p className="dim-text">
+              In proxy mode DHT and UDP trackers are turned off so nothing leaks
+              around the proxy — which can make rare, poorly-seeded torrents
+              harder to finish. For Nord, use your service credentials and a host
+              like <code>us.socks.nordhold.net</code>.
+            </p>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={form.proxy_kill_switch}
+                onChange={(e) => set("proxy_kill_switch", e.target.checked)}
+              />
+              Kill switch — pause torrents if the proxy drops (never touches the rest of your internet)
+            </label>
+            {form.proxy_kill_switch && (
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={form.auto_resume_on_reconnect}
+                  onChange={(e) => set("auto_resume_on_reconnect", e.target.checked)}
+                />
+                Auto-resume when the proxy is back
+              </label>
+            )}
           </>
         )}
-
-        {form.vpn_mode === "adapter" && (
-          <div className="form-row">
-            <label>VPN adapter name match (e.g. NordLynx)</label>
-            <input
-              value={form.vpn_adapter_name}
-              onChange={(e) => set("vpn_adapter_name", e.target.value)}
-            />
-          </div>
-        )}
-
-        <h4>NordVPN WireGuard — full tunnel, no app (best for hard-to-find torrents)</h4>
-        <p className="dim-text">
-          A real WireGuard tunnel carries everything — including DHT and UDP —
-          so scarce torrents that stall in proxy mode complete. Needs the tiny{" "}
-          <a href="https://www.wireguard.com/install/">WireGuard for Windows</a>{" "}
-          client (not the NordVPN app). Get an access token from{" "}
-          <a href="https://my.nordaccount.com/dashboard/nordvpn/manual-configuration/">
-            Nord Account → NordVPN → Set up manually
-          </a>
-          , paste it below, and set up.
-        </p>
-        <div className="form-row">
-          <label>Nord access token</label>
-          <div className="joined">
-            <input
-              type="password"
-              autoComplete="off"
-              placeholder="paste access token"
-              value={wgToken}
-              onChange={(e) => setWgToken(e.target.value)}
-            />
-            <button
-              className="btn primary"
-              onClick={setupWireguard}
-              disabled={wgBusy || !wgToken.trim()}
-            >
-              {wgBusy ? "Setting up…" : "Set up tunnel"}
-            </button>
-          </div>
-        </div>
-        {wgError && <p className="dim-text" style={{ color: "var(--red)" }}>{wgError}</p>}
-        {wgResult && (
-          <div className="wg-result">
-            <p>
-              ✓ Config written for <strong>{wgResult.server_hostname}</strong>
-              {wgResult.country ? ` (${wgResult.country})` : ""}. Switched to the{" "}
-              <code>{wgResult.tunnel_name}</code> tunnel with the kill switch.
-            </p>
-            <p className="dim-text">
-              Now activate it once: open WireGuard for Windows → Import tunnel(s)
-              from file → pick the config below → Activate. WireGuard remembers it
-              and reconnects automatically after that.
-              {!wgResult.wireguard_installed &&
-                " (WireGuard for Windows isn't installed yet — grab it from wireguard.com/install first.)"}
-            </p>
-            <button className="btn" onClick={() => api.openWireguardConfig().catch(() => {})}>
-              Open config file
-            </button>
-          </div>
-        )}
-
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={form.strict_vpn}
-            onChange={(e) => set("strict_vpn", e.target.checked)}
-          />
-          Strict mode — pause everything and block transfers whenever protection is not active
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={form.auto_resume_on_reconnect}
-            onChange={(e) => set("auto_resume_on_reconnect", e.target.checked)}
-          />
-          Auto-resume paused transfers when protection comes back
-        </label>
 
         <h4>About</h4>
         <div className="form-row">

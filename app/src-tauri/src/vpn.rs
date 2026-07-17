@@ -1,70 +1,51 @@
 use serde::Serialize;
 
-use crate::config::{Settings, VpnMode};
+use crate::config::Settings;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct VpnStatus {
-    pub protected: bool,
-    /// "proxy" or "adapter"
-    pub mode: String,
-    /// Human-readable description of what protects the traffic (or why nothing does).
+pub struct ProxyStatus {
+    /// Whether a proxy is configured (false = direct internet).
+    pub proxy_enabled: bool,
+    /// True when running direct, or when the configured proxy is reachable.
+    pub ok: bool,
     pub detail: String,
 }
 
-/// Compute the protection status for the current settings.
-///
-/// Proxy mode: the engine only dials peers/trackers through Nord's SOCKS5
-/// server, so traffic cannot leak — "protected" simply means credentials are
-/// configured (the session was built with the proxy).
-///
-/// Adapter mode: look for a network adapter whose name contains the
-/// configured substring (case-insensitive), e.g. NordLynx, which only exists
-/// while the tunnel is up.
-pub fn check(settings: &Settings) -> VpnStatus {
-    match settings.vpn_mode {
-        VpnMode::Proxy => {
-            if settings.proxy_configured() {
-                VpnStatus {
-                    protected: true,
-                    mode: "proxy".into(),
-                    detail: format!(
-                        "NordVPN SOCKS5 · {}:{}",
-                        settings.nord_socks_host, settings.nord_socks_port
-                    ),
-                }
-            } else {
-                VpnStatus {
-                    protected: false,
-                    mode: "proxy".into(),
-                    detail: "Nord service credentials not set — open settings".into(),
-                }
-            }
-        }
-        VpnMode::Adapter => {
-            let needle = settings.vpn_adapter_name.to_lowercase();
-            if let Ok(ifaces) = if_addrs::get_if_addrs() {
-                for iface in ifaces {
-                    if iface.is_loopback() {
-                        continue;
-                    }
-                    if iface.name.to_lowercase().contains(&needle) {
-                        let ip = iface.ip().to_string();
-                        return VpnStatus {
-                            protected: true,
-                            mode: "adapter".into(),
-                            detail: format!("{} · {}", iface.name, ip),
-                        };
-                    }
-                }
-            }
-            VpnStatus {
-                protected: false,
-                mode: "adapter".into(),
-                detail: format!(
-                    "{} adapter not found — VPN tunnel is down",
-                    settings.vpn_adapter_name
-                ),
-            }
+/// Health of the connection path. Direct mode is always ok; proxy mode does a
+/// quick TCP reachability check against the proxy endpoint.
+pub fn check(settings: &Settings) -> ProxyStatus {
+    if !settings.proxy_enabled() {
+        return ProxyStatus {
+            proxy_enabled: false,
+            ok: true,
+            detail: "Direct connection".into(),
+        };
+    }
+    let host = settings.proxy_host.trim();
+    let port = settings.proxy_port;
+    let reachable = tcp_reachable(host, port);
+    ProxyStatus {
+        proxy_enabled: true,
+        ok: reachable,
+        detail: if reachable {
+            format!("SOCKS5 · {host}:{port}")
+        } else {
+            format!("Proxy {host}:{port} unreachable")
+        },
+    }
+}
+
+/// Blocking TCP connect with a short timeout. Call from spawn_blocking in async
+/// contexts.
+fn tcp_reachable(host: &str, port: u16) -> bool {
+    use std::net::ToSocketAddrs;
+    let Ok(addrs) = (host, port).to_socket_addrs() else {
+        return false;
+    };
+    for addr in addrs {
+        if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(3)).is_ok() {
+            return true;
         }
     }
+    false
 }
