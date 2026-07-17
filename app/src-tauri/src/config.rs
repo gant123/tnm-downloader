@@ -39,8 +39,36 @@ pub struct Settings {
     /// Resume torrents the kill switch paused once the proxy is reachable again.
     pub auto_resume_on_reconnect: bool,
 
+    /// UI accent color: "green" | "blue" | "violet" | "amber".
+    pub accent: String,
+
+    // ---- Automation ----
+    /// Folder polled for new .torrent files to auto-add (empty = off).
+    pub watch_folder: String,
+    /// RSS feeds polled for new torrents to auto-add.
+    pub rss_feeds: Vec<RssFeed>,
+
     /// Info-hashes the user chose to keep seeding after completion.
     pub keep_seeding: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RssFeed {
+    pub url: String,
+    /// Case-insensitive substring an item title must contain (empty = all).
+    pub filter: String,
+    pub enabled: bool,
+}
+
+impl Default for RssFeed {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            filter: String::new(),
+            enabled: true,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -57,6 +85,9 @@ impl Default for Settings {
             proxy_pass: String::new(),
             proxy_kill_switch: false,
             auto_resume_on_reconnect: true,
+            accent: "green".to_string(),
+            watch_folder: String::new(),
+            rss_feeds: Vec::new(),
             keep_seeding: Vec::new(),
         }
     }

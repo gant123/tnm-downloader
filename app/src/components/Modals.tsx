@@ -109,6 +109,20 @@ export function SettingsModal({
     const dir = await open({ directory: true });
     if (typeof dir === "string") set("download_dir", dir);
   };
+  const pickWatchFolder = async () => {
+    const dir = await open({ directory: true });
+    if (typeof dir === "string") set("watch_folder", dir);
+  };
+
+  const setFeed = (i: number, patch: Partial<Settings["rss_feeds"][number]>) =>
+    setForm((f) => ({
+      ...f,
+      rss_feeds: f.rss_feeds.map((x, j) => (j === i ? { ...x, ...patch } : x)),
+    }));
+  const addFeed = () =>
+    setForm((f) => ({ ...f, rss_feeds: [...f.rss_feeds, { url: "", filter: "", enabled: true }] }));
+  const removeFeed = (i: number) =>
+    setForm((f) => ({ ...f, rss_feeds: f.rss_feeds.filter((_, j) => j !== i) }));
 
   const check = async () => {
     setChecking(true);
@@ -249,6 +263,87 @@ export function SettingsModal({
             )}
           </>
         )}
+
+        <h4>Appearance</h4>
+        <div className="form-row">
+          <label>Accent color</label>
+          <div style={{ display: "flex", gap: 10 }}>
+            {(
+              [
+                ["green", "#4fd18a"],
+                ["blue", "#5aa2f5"],
+                ["violet", "#b48ef5"],
+                ["amber", "#f5b74f"],
+              ] as const
+            ).map(([name, color]) => (
+              <div
+                key={name}
+                onClick={() => set("accent", name)}
+                title={name}
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: "50%",
+                  background: color,
+                  cursor: "pointer",
+                  boxShadow:
+                    form.accent === name ? `0 0 0 2px #14161a, 0 0 0 4px ${color}` : "none",
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        <h4>Automation</h4>
+        <div className="form-row">
+          <label>Watch folder — auto-add any .torrent dropped here</label>
+          <div className="joined">
+            <input
+              placeholder="(off)"
+              value={form.watch_folder}
+              onChange={(e) => set("watch_folder", e.target.value)}
+            />
+            <button className="btn" onClick={pickWatchFolder}>Browse</button>
+          </div>
+        </div>
+        <div className="form-row">
+          <label>RSS feeds — auto-download new torrents matching a title filter</label>
+          {form.rss_feeds.length === 0 && (
+            <p className="dim-text">No feeds yet. Add a feed URL and an optional title filter.</p>
+          )}
+          {form.rss_feeds.map((f, i) => (
+            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+              <div className="joined">
+                <input
+                  placeholder="https://…/rss"
+                  value={f.url}
+                  onChange={(e) => setFeed(i, { url: e.target.value })}
+                />
+                <button className="btn danger" onClick={() => removeFeed(i)} title="Remove feed">
+                  ✕
+                </button>
+              </div>
+              <div className="joined">
+                <input
+                  placeholder="Title contains… (blank = all)"
+                  value={f.filter}
+                  onChange={(e) => setFeed(i, { filter: e.target.value })}
+                />
+                <label className="check" style={{ whiteSpace: "nowrap" }}>
+                  <input
+                    type="checkbox"
+                    checked={f.enabled}
+                    onChange={(e) => setFeed(i, { enabled: e.target.checked })}
+                  />
+                  On
+                </label>
+              </div>
+            </div>
+          ))}
+          <button className="btn" onClick={addFeed} style={{ alignSelf: "flex-start" }}>
+            + Add feed
+          </button>
+        </div>
 
         <h4>About</h4>
         <div className="form-row">

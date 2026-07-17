@@ -1,5 +1,19 @@
 // Helpers for the Riptide UI: type badges, category derivation, sparkline paths.
 
+export const ACCENTS: Record<string, string> = {
+  green: "#4fd18a",
+  blue: "#5aa2f5",
+  violet: "#b48ef5",
+  amber: "#f5b74f",
+};
+export function accentColor(name: string): string {
+  return ACCENTS[name] ?? ACCENTS.green;
+}
+/** Upload-line color, kept distinct from the accent. */
+export function upColor(accentName: string): string {
+  return accentName === "blue" ? "#b48ef5" : "#5aa2f5";
+}
+
 export interface Badge {
   badge: string;
   color: string;

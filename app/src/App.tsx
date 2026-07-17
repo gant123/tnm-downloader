@@ -8,24 +8,13 @@ import { Download, Plus, Search, Settings as SettingsIcon, X } from "lucide-reac
 import * as api from "./api";
 import type { Filter, ProxyStatus, Settings, TorrentDetail, TorrentRow } from "./types";
 import { formatBytes, formatSpeed, progressPct, displayState, stateLabel } from "./format";
-import { badgeFor, categoryFor, categoryColor, spark, pushHist } from "./riptide";
+import { badgeFor, categoryFor, categoryColor, spark, pushHist, accentColor, upColor } from "./riptide";
 import { checkForUpdate, installUpdate } from "./updater";
 import RiptideSidebar, { type NavItem, type TagItem } from "./components/RiptideSidebar";
 import RiptideInspector from "./components/RiptideInspector";
 import { AddMagnetModal, RemoveModal, SettingsModal } from "./components/Modals";
 import logo from "./assets/logo.png";
 import "./App.css";
-
-const ACC = "#4fd18a";
-const UP = "#5aa2f5";
-const STATUS_COLOR: Record<string, string> = {
-  downloading: ACC,
-  seeding: "#5aa2f5",
-  completed: "#4fd18a",
-  paused: "#f5b74f",
-  checking: "#6b7178",
-  error: "#f5866b",
-};
 
 interface Hist {
   gDown: number[];
@@ -50,6 +39,20 @@ export default function App() {
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [installing, setInstalling] = useState(false);
   const hist = useRef<Hist>({ gDown: [], gUp: [], perId: new Map() });
+
+  const acc = accentColor(settings?.accent ?? "green");
+  const up = upColor(settings?.accent ?? "green");
+  const statusColor: Record<string, string> = {
+    downloading: acc,
+    seeding: "#5aa2f5",
+    completed: "#4fd18a",
+    paused: "#f5b74f",
+    checking: "#6b7178",
+    error: "#f5866b",
+  };
+  useEffect(() => {
+    document.documentElement.style.setProperty("--acc", acc);
+  }, [acc]);
 
   const showError = (msg: string) => {
     setToast(msg);
@@ -183,7 +186,7 @@ export default function App() {
 
   const nav: NavItem[] = [
     { key: "all", label: "All Torrents", dot: "#6b7178", count: counts.all ?? 0 },
-    { key: "downloading", label: "Downloading", dot: ACC, count: counts.downloading ?? 0 },
+    { key: "downloading", label: "Downloading", dot: acc, count: counts.downloading ?? 0 },
     { key: "seeding", label: "Seeding", dot: "#5aa2f5", count: counts.seeding ?? 0 },
     { key: "completed", label: "Completed", dot: "#4fd18a", count: counts.completed ?? 0 },
     {
@@ -264,11 +267,11 @@ export default function App() {
         <span className="rt-title-sub">Torrent Client</span>
         <div className="rt-flex" />
         <div className="rt-title-stat">
-          <span style={{ color: ACC }}>↓</span>
+          <span style={{ color: acc }}>↓</span>
           <span>{formatSpeed(totals.down)}</span>
         </div>
         <div className="rt-title-stat">
-          <span style={{ color: UP }}>↑</span>
+          <span style={{ color: up }}>↑</span>
           <span>{formatSpeed(totals.up)}</span>
         </div>
       </div>
@@ -319,18 +322,18 @@ export default function App() {
           <div className="rt-stats">
             <div className="rt-stat-card">
               <div className="rt-stat-label">Download</div>
-              <div className="rt-stat-big" style={{ color: ACC }}>{formatSpeed(totals.down)}</div>
+              <div className="rt-stat-big" style={{ color: acc }}>{formatSpeed(totals.down)}</div>
               <svg viewBox="0 0 180 30" preserveAspectRatio="none" className="rt-mini">
-                <path d={gd.area} fill={`${ACC}26`} />
-                <path d={gd.line} fill="none" stroke={ACC} strokeWidth={1.6} />
+                <path d={gd.area} fill={`${acc}26`} />
+                <path d={gd.line} fill="none" stroke={acc} strokeWidth={1.6} />
               </svg>
             </div>
             <div className="rt-stat-card">
               <div className="rt-stat-label">Upload</div>
-              <div className="rt-stat-big" style={{ color: UP }}>{formatSpeed(totals.up)}</div>
+              <div className="rt-stat-big" style={{ color: up }}>{formatSpeed(totals.up)}</div>
               <svg viewBox="0 0 180 30" preserveAspectRatio="none" className="rt-mini">
-                <path d={gu.area} fill={`${UP}22`} />
-                <path d={gu.line} fill="none" stroke={UP} strokeWidth={1.6} />
+                <path d={gu.area} fill={`${up}22`} />
+                <path d={gu.line} fill="none" stroke={up} strokeWidth={1.6} />
               </svg>
             </div>
             <div className="rt-stat-card center">
@@ -367,7 +370,7 @@ export default function App() {
               const st = t.stats;
               const sel = t.id === selectedId;
               const pct = progressPct(st);
-              const barColor = STATUS_COLOR[ds];
+              const barColor = statusColor[ds];
               const peers = st.live?.snapshot?.peer_stats;
               const eta =
                 ds === "downloading"
@@ -386,7 +389,7 @@ export default function App() {
                   key={t.id}
                   className="rt-row"
                   style={{
-                    borderLeftColor: sel ? ACC : "transparent",
+                    borderLeftColor: sel ? acc : "transparent",
                     background: sel ? "rgba(255,255,255,.055)" : "transparent",
                   }}
                   onClick={() => setSelectedId(t.id === selectedId ? null : t.id)}
@@ -412,12 +415,12 @@ export default function App() {
                     </div>
                   </div>
                   <div className="rt-status">
-                    <span className="rt-dot" style={{ background: STATUS_COLOR[ds] }} />
+                    <span className="rt-dot" style={{ background: statusColor[ds] }} />
                     <span>{stateLabel[ds]}</span>
                   </div>
                   <div className="rt-speed">
-                    <div style={{ color: dmbps > 0.0001 ? ACC : "#565c65" }}>↓ {formatSpeed(dmbps)}</div>
-                    <div style={{ color: umbps > 0.0001 ? UP : "#565c65" }}>↑ {formatSpeed(umbps)}</div>
+                    <div style={{ color: dmbps > 0.0001 ? acc : "#565c65" }}>↓ {formatSpeed(dmbps)}</div>
+                    <div style={{ color: umbps > 0.0001 ? up : "#565c65" }}>↑ {formatSpeed(umbps)}</div>
                   </div>
                   <div className="rt-peers">
                     <div>{peers?.live ?? 0} peers</div>
@@ -434,6 +437,8 @@ export default function App() {
           <RiptideInspector
             torrent={selected}
             detail={detail}
+            acc={acc}
+            up={up}
             histDown={hist.current.perId.get(selected.id)?.down ?? []}
             histUp={hist.current.perId.get(selected.id)?.up ?? []}
             onPause={() => api.pauseTorrent(selected.id).catch((e) => showError(String(e)))}

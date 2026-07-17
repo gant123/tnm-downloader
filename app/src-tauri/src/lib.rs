@@ -1,3 +1,4 @@
+mod automation;
 mod config;
 mod engine;
 mod vpn;
@@ -81,6 +82,8 @@ pub fn run() {
 
             engine::spawn_stats_loop(app.handle().clone());
             engine::spawn_proxy_watcher(app.handle().clone());
+            automation::spawn_watch_loop(app.handle().clone());
+            automation::spawn_rss_loop(app.handle().clone());
 
             // magnet: links routed to us by the OS
             #[cfg(desktop)]

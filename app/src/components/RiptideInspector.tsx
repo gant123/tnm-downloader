@@ -3,18 +3,11 @@ import type { TorrentDetail, TorrentRow } from "../types";
 import { formatBytes, formatSpeed, displayState, stateLabel } from "../format";
 import { badgeFor, categoryFor, spark } from "../riptide";
 
-const STATUS_COLOR: Record<string, string> = {
-  downloading: "#4fd18a",
-  seeding: "#5aa2f5",
-  completed: "#4fd18a",
-  paused: "#f5b74f",
-  checking: "#6b7178",
-  error: "#f5866b",
-};
-
 interface Props {
   torrent: TorrentRow;
   detail: TorrentDetail | null;
+  acc: string;
+  up: string;
   histDown: number[];
   histUp: number[];
   onPause: () => void;
@@ -29,8 +22,16 @@ export default function RiptideInspector(p: Props) {
   const ds = displayState(s);
   const running = s.state === "live" || s.state === "initializing";
   const badge = badgeFor(t.name);
-  const acc = "#4fd18a";
-  const up = "#5aa2f5";
+  const acc = p.acc;
+  const up = p.up;
+  const STATUS_COLOR: Record<string, string> = {
+    downloading: acc,
+    seeding: "#5aa2f5",
+    completed: "#4fd18a",
+    paused: "#f5b74f",
+    checking: "#6b7178",
+    error: "#f5866b",
+  };
 
   const dd = p.histDown.slice(-48);
   const uu = p.histUp.slice(-48);

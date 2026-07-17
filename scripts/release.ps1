@@ -59,7 +59,7 @@ $NsisDir = Join-Path $SrcTauri "target\release\bundle\nsis"
 $Setup = Get-ChildItem $NsisDir -Filter "*-setup.exe" | Select-Object -First 1
 if (-not $Setup) { throw "No -setup.exe produced in $NsisDir" }
 $SigPath = "$($Setup.FullName).sig"
-if (-not (Test-Path $SigPath)) { throw "No .sig next to $($Setup.Name) — is createUpdaterArtifacts on?" }
+if (-not (Test-Path $SigPath)) { throw "No .sig next to $($Setup.Name) - is createUpdaterArtifacts on?" }
 
 # GitHub rewrites spaces to dots in uploaded asset names.
 $AssetName = $Setup.Name -replace ' ', '.'

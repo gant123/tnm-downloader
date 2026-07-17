@@ -75,7 +75,16 @@ export interface Settings {
   proxy_pass: string;
   proxy_kill_switch: boolean;
   auto_resume_on_reconnect: boolean;
+  accent: string;
+  watch_folder: string;
+  rss_feeds: RssFeed[];
   keep_seeding: string[];
+}
+
+export interface RssFeed {
+  url: string;
+  filter: string;
+  enabled: boolean;
 }
 
 export interface ProxyStatus {
