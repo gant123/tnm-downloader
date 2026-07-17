@@ -5,9 +5,11 @@ import type { Settings } from "../types";
 
 export function AddMagnetModal({
   onAdd,
+  onFile,
   onClose,
 }: {
   onAdd: (src: string) => void;
+  onFile?: () => void;
   onClose: () => void;
 }) {
   const [value, setValue] = useState("");
@@ -18,11 +20,11 @@ export function AddMagnetModal({
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Add magnet link</h3>
+        <h3>Add torrent</h3>
         <textarea
           autoFocus
           rows={4}
-          placeholder="magnet:?xt=urn:btih:…"
+          placeholder="Paste a magnet link:  magnet:?xt=urn:btih:…"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
@@ -33,6 +35,11 @@ export function AddMagnetModal({
           }}
         />
         <div className="modal-actions">
+          {onFile && (
+            <button className="btn ghost" onClick={onFile} style={{ marginRight: "auto" }}>
+              Choose .torrent file…
+            </button>
+          )}
           <button className="btn ghost" onClick={onClose}>Cancel</button>
           <button className="btn primary" onClick={submit} disabled={!value.trim()}>
             Add download
